@@ -1,6 +1,4 @@
-#ifdef USE_OPENCV
 #include <opencv2/core/core.hpp>
-#endif  // USE_OPENCV
 
 #include <string>
 #include <vector>
@@ -156,7 +154,9 @@ template<typename Dtype>
 void DataTransformer<Dtype>::Transform(const Datum& datum,
                                        Blob<Dtype>* transformed_blob,
                                        NormalizedBBox* crop_bbox,
-                                       bool* do_mirror) {
+                                       bool* do_mirror,
+				       const bool preserve_pixel_vals,
+				       const bool preserve_annotations) {
   // If datum is encoded, decoded and transform the cv::image.
   if (datum.encoded()) {
 #ifdef USE_OPENCV
@@ -170,9 +170,11 @@ void DataTransformer<Dtype>::Transform(const Datum& datum,
       cv_img = DecodeDatumToCVMatNative(datum);
     }
     // Transform the cv::image into blob.
-    return Transform(cv_img, transformed_blob, crop_bbox, do_mirror);
+    return Transform(cv_img, transformed_blob, crop_bbox, do_mirror,
+		     preserve_pixel_vals, preserve_annotations);
 #else
-    LOG(FATAL) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(ERROR) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(FATAL) << "fatal error";
 #endif  // USE_OPENCV
   } else {
     if (param_.force_color() || param_.force_gray()) {
@@ -244,11 +246,15 @@ void DataTransformer<Dtype>::Transform(
   // Transform datum.
   const Datum& datum = anno_datum.datum();
   NormalizedBBox crop_bbox;
-  Transform(datum, transformed_blob, &crop_bbox, do_mirror);
+  bool preserve_pixel_vals = false;
+  bool preserve_annotations = true;
+  Transform(datum, transformed_blob, &crop_bbox, do_mirror,
+	    preserve_pixel_vals, preserve_annotations);
 
   // Transform annotation.
   const bool do_resize = true;
-  TransformAnnotation(anno_datum, do_resize, crop_bbox, *do_mirror,
+  const bool do_crop = true;
+  TransformAnnotation(anno_datum, do_resize, crop_bbox, *do_mirror, do_crop,
                       transformed_anno_group_all);
 }
 
@@ -285,7 +291,8 @@ template<typename Dtype>
 void DataTransformer<Dtype>::TransformAnnotation(
     const AnnotatedDatum& anno_datum, const bool do_resize,
     const NormalizedBBox& crop_bbox, const bool do_mirror,
-    RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all) {
+    const bool do_crop,
+    RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all, const int rangle) {
   const int img_height = anno_datum.datum().height();
   const int img_width = anno_datum.datum().width();
   if (anno_datum.type() == AnnotatedDatum_AnnotationType_BBOX) {
@@ -306,13 +313,15 @@ void DataTransformer<Dtype>::TransformAnnotation(
           UpdateBBoxByResizePolicy(param_.resize_param(), img_width, img_height,
                                    &resize_bbox);
         }
-        if (param_.has_emit_constraint() &&
+        if (do_crop && param_.has_emit_constraint() &&
             !MeetEmitConstraint(crop_bbox, resize_bbox,
                                 param_.emit_constraint())) {
           continue;
         }
         NormalizedBBox proj_bbox;
-        if (ProjectBBox(crop_bbox, resize_bbox, &proj_bbox)) {
+	if (!do_crop)
+	  proj_bbox = resize_bbox;
+        if (!do_crop || ProjectBBox(crop_bbox, resize_bbox, &proj_bbox)) {
           has_valid_annotation = true;
           Annotation* transformed_anno =
               transformed_anno_group.add_annotation();
@@ -324,11 +333,17 @@ void DataTransformer<Dtype>::TransformAnnotation(
             transformed_bbox->set_xmin(1 - transformed_bbox->xmax());
             transformed_bbox->set_xmax(1 - temp);
           }
-          if (do_resize && param_.has_resize_param()) {
+          if (do_crop && do_resize && param_.has_resize_param()) {
             ExtrapolateBBox(param_.resize_param(), img_height, img_width,
                 crop_bbox, transformed_bbox);
           }
-        }
+	  // apply rotation to bbox
+	  if (rangle != 0)
+	    {
+	      NormalizedBBox src_bbox(*transformed_bbox);
+	      RotateBBox(rangle, src_bbox, transformed_bbox);
+	    }
+	}
       }
       // Save for output.
       if (has_valid_annotation) {
@@ -337,7 +352,8 @@ void DataTransformer<Dtype>::TransformAnnotation(
       }
     }
   } else {
-    LOG(FATAL) << "Unknown annotation type.";
+    LOG(ERROR) << "Unknown annotation type.";
+    LOG(FATAL) << "fatal error";
   }
 }
 
@@ -366,7 +382,8 @@ void DataTransformer<Dtype>::CropImage(const Datum& datum,
     crop_datum->set_label(datum.label());
     return;
 #else
-    LOG(FATAL) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(ERROR) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(FATAL) << "fatal error";
 #endif  // USE_OPENCV
   } else {
     if (param_.force_color() || param_.force_gray()) {
@@ -422,9 +439,10 @@ void DataTransformer<Dtype>::CropImage(const AnnotatedDatum& anno_datum,
   // Transform the annotation according to crop_bbox.
   const bool do_resize = false;
   const bool do_mirror = false;
+  const bool do_crop = true;
   NormalizedBBox crop_bbox;
   ClipBBox(bbox, &crop_bbox);
-  TransformAnnotation(anno_datum, do_resize, crop_bbox, do_mirror,
+  TransformAnnotation(anno_datum, do_resize, crop_bbox, do_mirror, do_crop,
                       cropped_anno_datum->mutable_annotation_group());
 }
 
@@ -453,7 +471,8 @@ void DataTransformer<Dtype>::ExpandImage(const Datum& datum,
     expand_datum->set_label(datum.label());
     return;
 #else
-    LOG(FATAL) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(ERROR) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(FATAL) << "fatal error";
 #endif  // USE_OPENCV
   } else {
     if (param_.force_color() || param_.force_gray()) {
@@ -530,13 +549,94 @@ void DataTransformer<Dtype>::ExpandImage(const AnnotatedDatum& anno_datum,
               expanded_anno_datum->mutable_datum());
   expanded_anno_datum->set_type(anno_datum.type());
 
-  // Transform the annotation according to crop_bbox.
+  // Transform the annotation according to expand_bbox.
   const bool do_resize = false;
   const bool do_mirror = false;
-  TransformAnnotation(anno_datum, do_resize, expand_bbox, do_mirror,
+  const bool do_crop = true;
+  TransformAnnotation(anno_datum, do_resize, expand_bbox, do_mirror, do_crop,
                       expanded_anno_datum->mutable_annotation_group());
 }
 
+#ifdef USE_OPENCV
+template<typename Dtype>
+void DataTransformer<Dtype>::RotateImage(cv::Mat &cv_img,
+					 int &r)
+{
+  r = rd_(rg_);
+  if (r > 0)
+    {
+      int height = cv_img.rows;
+      int width = cv_img.cols;
+      CHECK(height == width) << "If random rotation is enabled, the image must be square";
+      if (r != 2)
+	{
+	  cv::Mat cv_timg;
+	  transpose(cv_img,cv_timg);
+	  if (r == 1) // 90
+	    flip(cv_timg,cv_img,1);
+	  else if (r == 3) // 270
+	    flip(cv_timg,cv_img,0);
+	}
+      else // 180
+	{
+	  cv::Mat cv_imgr;
+	  flip(cv_img,cv_imgr,-1);
+	  cv_img = cv_imgr;
+	}
+    }
+}
+#endif
+  
+template<typename Dtype>
+void DataTransformer<Dtype>::RotateImage(const Datum& datum,
+					 Datum* rotate_datum,
+					 int& r)
+{
+  // If datum is encoded, decode and rotate the cv::image.
+  if (datum.encoded()) {
+#ifdef USE_OPENCV
+    CHECK(!(param_.force_color() && param_.force_gray()))
+      << "cannot set both force_color and force_gray";
+    cv::Mat cv_img;
+    if (param_.force_color() || param_.force_gray()) {
+      // If force_color then decode in color otherwise decode in gray.
+      cv_img = DecodeDatumToCVMat(datum, param_.force_color());
+    } else {
+      cv_img = DecodeDatumToCVMatNative(datum);
+    }
+    RotateImage(cv_img,r);
+  // Save the image into datum.
+  EncodeCVMatToDatum(cv_img, "jpg", rotate_datum);
+  rotate_datum->set_label(datum.label());
+  return;
+#else
+  LOG(ERROR) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(FATAL) << "fatal error";
+#endif  // USE_OPENCV
+  } else {
+    if (param_.force_color() || param_.force_gray()) {
+      LOG(ERROR) << "force_color and force_gray only for encoded datum";
+    }
+  }
+}
+
+template<typename Dtype>
+void DataTransformer<Dtype>::RotateImage(const AnnotatedDatum& anno_datum,
+					 AnnotatedDatum* rotated_anno_datum) {
+  // Rotate the datum
+  int rangle = 0;
+  RotateImage(anno_datum.datum(), rotated_anno_datum->mutable_datum(), rangle);
+  rotated_anno_datum->set_type(anno_datum.type());
+  
+  // Transform annotation according to rotate_box
+  const bool do_resize = false;
+  const bool do_mirror = false;
+  const bool do_crop = false;
+  NormalizedBBox crop_bbox;
+  TransformAnnotation(anno_datum, do_resize, crop_bbox, do_mirror, do_crop,
+    rotated_anno_datum->mutable_annotation_group(),rangle);
+}
+  
 template<typename Dtype>
 void DataTransformer<Dtype>::DistortImage(const Datum& datum,
                                           Datum* distort_datum) {
@@ -563,7 +663,8 @@ void DataTransformer<Dtype>::DistortImage(const Datum& datum,
     distort_datum->set_label(datum.label());
     return;
 #else
-    LOG(FATAL) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(ERROR) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(FATAL) << "fatal error";
 #endif  // USE_OPENCV
   } else {
     LOG(ERROR) << "Only support encoded datum now";
@@ -595,7 +696,9 @@ template<typename Dtype>
 void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
                                        Blob<Dtype>* transformed_blob,
                                        NormalizedBBox* crop_bbox,
-                                       bool* do_mirror) {
+                                       bool* do_mirror,
+                                       bool preserve_pixel_vals,
+				       bool preserve_annotations) {
   // Check dimensions.
   const int img_channels = cv_img.channels();
   const int channels = transformed_blob->channels();
@@ -615,11 +718,11 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
   const bool has_mean_values = mean_values_.size() > 0;
 
   Dtype* mean = NULL;
-  if (has_mean_file) { // XXX beniz: doesn't work with bbox since the image is already cropped according to bbox, use mean values instead
+  if (has_mean_file && !preserve_pixel_vals) {  // XXX beniz: doesn't work with bbox since the image is already cropped according to bbox, use mean values instead
     CHECK_EQ(img_channels, data_mean_.channels());
     mean = data_mean_.mutable_cpu_data();
   }
-  if (has_mean_values) {
+  if (has_mean_values && !preserve_pixel_vals) {
     CHECK(mean_values_.size() == 1 || mean_values_.size() == img_channels) <<
         "Specify either 1 mean_value or as many as channels: " << img_channels;
     if (img_channels > 1 && mean_values_.size() == 1) {
@@ -643,12 +746,12 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
   } else {
     cv_resized_image = cv_img;
   }
-  if (param_.has_distort_param()) { //TODO: not for annotated datum, since labels do change in that case (taken care of from within data layer)
+  if (param_.has_distort_param() && !preserve_pixel_vals) {
     cv_distort_image = ApplyDistort(cv_resized_image, param_.distort_param());
   } else {
     cv_distort_image = cv_resized_image;
   }
-  if (param_.has_noise_param()) {
+  if (param_.has_noise_param() && !preserve_pixel_vals) {
     cv_noised_image = ApplyNoise(cv_distort_image, param_.noise_param());
   } else {
     cv_noised_image = cv_distort_image;
@@ -689,28 +792,10 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
   }
   CHECK(cv_cropped_image.data);
 
-  if (param_.rotate() && phase_ == TRAIN)
-  {  
-    int r = rd_(rg_);
-    if (r > 0)
-      {
-	CHECK(height == width) << "If random rotation is enabled, the image must be square";
-	if (r != 2)
-	  {
-	    cv::Mat cv_timg;
-	    transpose(cv_cropped_image,cv_timg);
-	    if (r == 1) // 90
-	      flip(cv_timg,cv_cropped_image,1);
-	    else if (r == 3) // 270
-	      flip(cv_timg,cv_cropped_image,0);
-	  }
-	else // 180
-	  {
-	    cv::Mat cv_imgr;
-	    flip(cv_cropped_image,cv_imgr,-1);
-	    cv_cropped_image = cv_imgr;
-	  }
-      }
+  if (param_.rotate() && !preserve_annotations && phase_ == TRAIN) // deactivated with annotated datum
+  {
+    int r = 0;
+    RotateImage(cv_cropped_image,r);
   }
   
   Dtype* transformed_data = transformed_blob->mutable_cpu_data();
@@ -729,13 +814,13 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
       for (int c = 0; c < img_channels; ++c) {
         top_index = (c * height + h_idx_real) * width + w_idx_real;
         Dtype pixel = static_cast<Dtype>(ptr[img_index++]);
-        if (has_mean_file) {
+        if (has_mean_file && !preserve_pixel_vals) {
           int mean_index = (c * img_height + h_off + h_idx_real) * img_width
               + w_off + w_idx_real;
           transformed_data[top_index] =
               (pixel - mean[mean_index]) * scale;
         } else {
-          if (has_mean_values) {
+          if (has_mean_values && !preserve_pixel_vals) {
             transformed_data[top_index] =
                 (pixel - mean_values_[c]) * scale;
           } else {
@@ -822,10 +907,12 @@ void DataTransformer<Dtype>::TransformInv(const Blob<Dtype>* blob,
 
 template<typename Dtype>
 void DataTransformer<Dtype>::Transform(const cv::Mat& cv_img,
-                                       Blob<Dtype>* transformed_blob) {
+                                       Blob<Dtype>* transformed_blob,
+				       bool preserve_pixel_vals,
+				       bool preserve_annotations) {
   NormalizedBBox crop_bbox;
   bool do_mirror;
-  Transform(cv_img, transformed_blob, &crop_bbox, &do_mirror);
+  Transform(cv_img, transformed_blob, &crop_bbox, &do_mirror, preserve_pixel_vals);
 }
 
 template <typename Dtype>
@@ -1048,7 +1135,8 @@ vector<int> DataTransformer<Dtype>::InferBlobShape(const Datum& datum) {
     // InferBlobShape using the cv::image.
     return InferBlobShape(cv_img);
 #else
-    LOG(FATAL) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(ERROR) << "Encoded datum requires OpenCV; compile with USE_OPENCV.";
+    LOG(FATAL) << "fatal error";
 #endif  // USE_OPENCV
   }
 
@@ -1132,7 +1220,8 @@ vector<int> DataTransformer<Dtype>::InferBlobShape(const cv::Mat& cv_img) {
   shape[3] = (crop_w)? crop_w: img_width;
   return shape;
 }
-
+#endif // USE_OPENCV
+ 
 template<typename Dtype>
 vector<int> DataTransformer<Dtype>::InferBlobShape(
     const vector<cv::Mat> & mat_vector) {
@@ -1144,7 +1233,6 @@ vector<int> DataTransformer<Dtype>::InferBlobShape(
   shape[0] = num;
   return shape;
 }
-#endif  // USE_OPENCV
 
 template <typename Dtype>
 void DataTransformer<Dtype>::InitRand() {

@@ -82,6 +82,7 @@ void IntersectBBox(const NormalizedBBox& bbox1, const NormalizedBBox& bbox2,
 float BBoxSize(const NormalizedBBox& bbox, const bool normalized) {
   if (bbox.xmax() < bbox.xmin() || bbox.ymax() < bbox.ymin()) {
     // If bbox is invalid (e.g. xmax < xmin or ymax < ymin), return 0.
+    LOG(ERROR) << "Invalid bbox=" << bbox.xmin() << " " << bbox.ymin() << " " << bbox.xmax() << " " << bbox.ymax() << std::endl;
     return 0;
   } else {
     if (bbox.has_size()) {
@@ -103,6 +104,7 @@ template <typename Dtype>
 Dtype BBoxSize(const Dtype* bbox, const bool normalized) {
   if (bbox[2] < bbox[0] || bbox[3] < bbox[1]) {
     // If bbox is invalid (e.g. xmax < xmin or ymax < ymin), return 0.
+    LOG(ERROR) << "Invalid bbox=" << bbox[0] << " " << bbox[1] << " " << bbox[2] << " " << bbox[3] << std::endl;
     return Dtype(0.);
   } else {
     const Dtype width = bbox[2] - bbox[0];
@@ -203,7 +205,8 @@ void OutputBBox(const NormalizedBBox& bbox, const pair<int, int>& img_size,
         }
         break;
       default:
-        LOG(FATAL) << "Unknown resize mode.";
+        LOG(ERROR) << "Unknown resize mode.";
+	LOG(FATAL) << "fatal error";
     }
   } else {
     // Clip the normalized bbox first.
@@ -271,6 +274,46 @@ void ExtrapolateBBox(const ResizeParameter& param, const int height,
   }
 }
 
+void RotateBBox(const int rangle, const NormalizedBBox& bbox, NormalizedBBox* rbbox)
+{
+  // images and bbox are already scaled
+  int width = 1.0;
+  int height = 1.0;
+  //std::cerr << "initial bbox / xmin=" << bbox.xmin() << " / ymin=" << bbox.ymin() << " / xmax=" << bbox.xmax() << " / ymax=" << bbox.ymax() << std::endl;
+  if (rangle == 0)
+    {
+      rbbox->set_xmin(bbox.xmin());
+      rbbox->set_ymin(bbox.ymin());
+      rbbox->set_xmax(bbox.xmax());
+      rbbox->set_ymax(bbox.ymax());
+    }
+  else if (rangle == 1) // 90
+    {
+      rbbox->set_xmin(bbox.ymin());
+      rbbox->set_ymin(height-bbox.xmax());
+      rbbox->set_xmax(bbox.ymax());
+      rbbox->set_ymax(height-bbox.xmin());
+    }
+  else if (rangle == 2) // 180
+    {
+      rbbox->set_xmin(width-bbox.xmax());
+      rbbox->set_ymin(height-bbox.ymax());
+      rbbox->set_xmax(width-bbox.xmin());
+      rbbox->set_ymax(height-bbox.ymin());
+    }
+  else if (rangle == 3) // 270
+    {
+      rbbox->set_xmin(height-bbox.ymax());
+      rbbox->set_ymin(bbox.xmin());
+      rbbox->set_xmax(height-bbox.ymin());
+      rbbox->set_ymax(bbox.xmax());
+    }
+  rbbox->clear_size();
+  rbbox->set_size(BBoxSize(*rbbox));
+  rbbox->set_difficult(bbox.difficult());
+  //std::cerr << "rangle=" << rangle << " / output bbox / xmin=" << rbbox->xmin() << " / ymin=" << rbbox->ymin() << " / xmax=" << rbbox->xmax() << " / ymax=" << rbbox->ymax() << std::endl;
+}
+  
 float JaccardOverlap(const NormalizedBBox& bbox1, const NormalizedBBox& bbox2,
                      const bool normalized) {
   NormalizedBBox intersect_bbox;
@@ -347,7 +390,8 @@ bool MeetEmitConstraint(const NormalizedBBox& src_bbox,
     float bbox_coverage = BBoxCoverage(bbox, src_bbox);
     return bbox_coverage > emit_constraint.emit_overlap();
   } else {
-    LOG(FATAL) << "Unknown emit type.";
+    LOG(ERROR) << "Unknown emit type.";
+    LOG(FATAL) << "fatal error";
     return false;
   }
 }
@@ -434,7 +478,8 @@ void EncodeBBox(
           (bbox.ymax() - prior_bbox.ymax()) / prior_height / prior_variance[3]);
     }
   } else {
-    LOG(FATAL) << "Unknown LocLossType.";
+    LOG(ERROR) << "Unknown LocLossType.";
+    LOG(FATAL) << "fatal error";
   }
 }
 
@@ -519,7 +564,8 @@ void DecodeBBox(
           prior_bbox.ymax() + prior_variance[3] * bbox.ymax() * prior_height);
     }
   } else {
-    LOG(FATAL) << "Unknown LocLossType.";
+    LOG(ERROR) << "Unknown LocLossType.";
+    LOG(FATAL) << "fatal error";
   }
   float bbox_size = BBoxSize(*decode_bbox);
   decode_bbox->set_size(bbox_size);
@@ -570,7 +616,8 @@ void DecodeBBoxesAll(const vector<LabelBBox>& all_loc_preds,
       }
       if (all_loc_preds[i].find(label) == all_loc_preds[i].end()) {
         // Something bad happened if there are no predictions for current label.
-        LOG(FATAL) << "Could not find location predictions for label " << label;
+        LOG(ERROR) << "Could not find location predictions for label " << label;
+	LOG(FATAL) << "fatal error";
       }
       const vector<NormalizedBBox>& label_loc_preds =
           all_loc_preds[i].find(label)->second;
@@ -712,7 +759,8 @@ void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
       }
       break;
     default:
-      LOG(FATAL) << "Unknown matching type.";
+      LOG(ERROR) << "Unknown matching type.";
+      LOG(FATAL) << "fatal error";
       break;
   }
 
@@ -1309,7 +1357,8 @@ void ComputeLocLoss(const Blob<Dtype>& loc_pred, const Blob<Dtype>& loc_gt,
           } else if (loc_loss_type == MultiBoxLossParameter_LocLossType_L2) {
             loss += 0.5 * val * val;
           } else {
-            LOG(FATAL) << "Unknown loc loss type.";
+            LOG(ERROR) << "Unknown loc loss type.";
+	    LOG(FATAL) << "fatal error";
           }
         }
         loc_loss[j] = loss;
@@ -1431,7 +1480,8 @@ void ComputeConfLoss(const Dtype* conf_data, const int num,
               log(1 + exp(input - 2 * input * (input >= 0)));
         }
       } else {
-        LOG(FATAL) << "Unknown conf loss type.";
+        LOG(ERROR) << "Unknown conf loss type.";
+	LOG(FATAL) << "fatal error";
       }
       conf_loss.push_back(loss);
     }
@@ -1513,7 +1563,8 @@ void ComputeConfLoss(const Dtype* conf_data, const int num,
               log(1 + exp(input - 2 * input * (input >= 0)));
         }
       } else {
-        LOG(FATAL) << "Unknown conf loss type.";
+        LOG(ERROR) << "Unknown conf loss type.";
+	LOG(FATAL) << "fatal error";
       }
       conf_loss.push_back(loss);
     }
@@ -1594,7 +1645,8 @@ void EncodeConfPrediction(const Dtype* conf_data, const int num,
               conf_gt_data[idx * num_classes + gt_label] = 1;
               break;
             default:
-              LOG(FATAL) << "Unknown conf loss type.";
+              LOG(ERROR) << "Unknown conf loss type.";
+	      LOG(FATAL) << "fatal error";
           }
           if (do_neg_mining) {
             // Copy scores for matched bboxes.
@@ -1623,7 +1675,8 @@ void EncodeConfPrediction(const Dtype* conf_data, const int num,
               }
               break;
             default:
-              LOG(FATAL) << "Unknown conf loss type.";
+              LOG(ERROR) << "Unknown conf loss type.";
+	      LOG(FATAL) << "fatal error";
           }
           ++count;
         }
@@ -1898,6 +1951,49 @@ inline int clamp(const int v, const int a, const int b) {
   return v < a ? a : v > b ? b : v;
 }
 
+void ApplySoftNMSFast(const vector<NormalizedBBox>& bboxes,
+		      const vector<float>& scores, const float score_threshold,
+		      const float nms_threshold, const float eta, const float theta, const int top_k,
+		      vector<int>* indices) {
+  // Sanity check.
+  CHECK_EQ(bboxes.size(), scores.size())
+      << "bboxes and scores have different size.";
+
+  // Get top_k scores (with corresponding indices).
+  vector<pair<float, int> > score_index_vec;
+  GetMaxScoreIndex(scores, score_threshold, top_k, &score_index_vec);
+
+  // Do nms.
+  float adaptive_threshold = nms_threshold;
+  indices->clear();
+  while (score_index_vec.size() != 0) {
+    const int idx = score_index_vec.front().second;
+    float cscore = score_index_vec.front().first;
+    bool keep = true;
+    for (int k = 0; k < indices->size(); ++k) {
+      if (keep) {
+        const int kept_idx = (*indices)[k];
+        float overlap = JaccardOverlap(bboxes[idx], bboxes[kept_idx]);
+	float nscore = cscore * exp(-(overlap*overlap)/theta);
+	score_index_vec.push_back(std::make_pair(nscore,idx));
+	score_index_vec.erase(score_index_vec.begin());
+	std::stable_sort(score_index_vec.begin(), score_index_vec.end(),
+			 SortScorePairDescend<int>);
+        keep = overlap <= adaptive_threshold;
+      } else {
+        break;
+      }
+    }
+    if (keep) {
+      indices->push_back(idx);
+    }
+    score_index_vec.erase(score_index_vec.begin());
+    if (keep && eta < 1 && adaptive_threshold > 0.5) {
+      adaptive_threshold *= eta;
+    }
+  }
+}
+  
 void ApplyNMSFast(const vector<NormalizedBBox>& bboxes,
       const vector<float>& scores, const float score_threshold,
       const float nms_threshold, const float eta, const int top_k,
@@ -1935,6 +2031,45 @@ void ApplyNMSFast(const vector<NormalizedBBox>& bboxes,
   }
 }
 
+template <typename Dtype>
+void ApplySoftNMSFast(const Dtype* bboxes, const Dtype* scores, const int num,
+      const float score_threshold, const float nms_threshold,
+		      const float eta, const float theta, const int top_k, vector<int>* indices) {
+  // Get top_k scores (with corresponding indices).
+  vector<pair<Dtype, int> > score_index_vec;
+  GetMaxScoreIndex(scores, num, score_threshold, top_k, &score_index_vec);
+
+  // Do nms.
+  float adaptive_threshold = nms_threshold;
+  indices->clear();
+  while (score_index_vec.size() != 0) {
+    const int idx = score_index_vec.front().second;
+    float cscore = score_index_vec.front().first;
+    bool keep = true;
+    for (int k = 0; k < indices->size(); ++k) {
+      if (keep) {
+        const int kept_idx = (*indices)[k];
+        float overlap = JaccardOverlap(bboxes + idx * 4, bboxes + kept_idx * 4);
+	float nscore = cscore * exp(-(overlap*overlap)/theta);
+	score_index_vec.push_back(std::make_pair(nscore,idx));
+	score_index_vec.erase(score_index_vec.begin());
+	std::stable_sort(score_index_vec.begin(), score_index_vec.end(),
+			 SortScorePairDescend<int>);
+        keep = overlap <= adaptive_threshold;
+      } else {
+        break;
+      }
+    }
+    if (keep) {
+      indices->push_back(idx);
+    }
+    score_index_vec.erase(score_index_vec.begin());
+    if (keep && eta < 1 && adaptive_threshold > 0.5) {
+      adaptive_threshold *= eta;
+    }
+  }
+}
+  
 template <typename Dtype>
 void ApplyNMSFast(const Dtype* bboxes, const Dtype* scores, const int num,
       const float score_threshold, const float nms_threshold,
@@ -1976,6 +2111,15 @@ template
 void ApplyNMSFast(const double* bboxes, const double* scores, const int num,
       const float score_threshold, const float nms_threshold,
       const float eta, const int top_k, vector<int>* indices);
+
+template
+void ApplySoftNMSFast(const float* bboxes, const float* scores, const int num,
+      const float score_threshold, const float nms_threshold,
+      const float eta, const float theta, const int top_k, vector<int>* indices);
+template
+void ApplySoftNMSFast(const double* bboxes, const double* scores, const int num,
+      const float score_threshold, const float nms_threshold,
+      const float eta, const float theta, const int top_k, vector<int>* indices);
 
 void CumSum(const vector<pair<float, int> >& pairs, vector<int>* cumsum) {
   // Sort the pairs based on first item of the pair.
@@ -2077,7 +2221,8 @@ void ComputeAP(const vector<pair<float, int> >& tp, const int num_pos,
       prev_rec = (*rec)[i];
     }
   } else {
-    LOG(FATAL) << "Unknown ap_version: " << ap_version;
+    LOG(ERROR) << "Unknown ap_version: " << ap_version;
+    LOG(FATAL) << "fatal error";
   }
 }
 

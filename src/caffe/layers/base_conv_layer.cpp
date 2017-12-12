@@ -19,7 +19,6 @@ void BaseConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   const int num_axes = bottom[0]->num_axes();
   num_spatial_axes_ = num_axes - first_spatial_axis;
   CHECK_GE(num_spatial_axes_, 0);
-  vector<int> bottom_dim_blob_shape(1, num_spatial_axes_ + 1);
   vector<int> spatial_dim_blob_shape(1, std::max(num_spatial_axes_, 1));
   // Setup filter kernel dimensions (kernel_shape_).
   kernel_shape_.Reshape(spatial_dim_blob_shape);
@@ -145,15 +144,17 @@ void BaseConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
         << "Incorrect number of weight blobs.";
     if (weight_shape != this->blobs_[0]->shape()) {
       Blob<Dtype> weight_shaped_blob(weight_shape);
-      LOG(FATAL) << "Incorrect weight shape: expected shape "
+      LOG(ERROR) << "Incorrect weight shape: expected shape "
           << weight_shaped_blob.shape_string() << "; instead, shape was "
           << this->blobs_[0]->shape_string();
+      LOG(FATAL) << "fatal error";
     }
     if (bias_term_ && bias_shape != this->blobs_[1]->shape()) {
       Blob<Dtype> bias_shaped_blob(bias_shape);
-      LOG(FATAL) << "Incorrect bias shape: expected shape "
+      LOG(ERROR) << "Incorrect bias shape: expected shape "
           << bias_shaped_blob.shape_string() << "; instead, shape was "
           << this->blobs_[1]->shape_string();
+      LOG(FATAL) << "fatal error";
     }
     LOG(INFO) << "Skipping parameter initialization";
   } else {

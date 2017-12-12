@@ -96,11 +96,15 @@ class DataTransformer {
    *    If true, meaning the datum has mirrored.
    * @param transformed_anno_group_all
    *    Stores all transformed AnnotationGroup.
+   * @param rangle
+   *    The rotation angle, if any
    */
   void TransformAnnotation(
       const AnnotatedDatum& anno_datum, const bool do_resize,
       const NormalizedBBox& crop_bbox, const bool do_mirror,
-      RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all);
+      const bool do_crop,
+      RepeatedPtrField<AnnotationGroup>* transformed_anno_group_all,
+      const int rangle=0);
 
   /**
    * @brief Crops the datum according to bbox.
@@ -133,6 +137,25 @@ class DataTransformer {
 
 #ifdef USE_OPENCV
   /**
+   * @brief Rotate image.
+   */
+  void RotateImage(cv::Mat &cv_img,
+		   int &r);
+  
+  /**
+   * @brief Rotate datum
+   */
+  void RotateImage(const Datum& datum,
+		   Datum* rotate_datum,
+		   int& r);
+
+  /**
+   * @brief Rotate annotated datum and annotations (bbox)
+   */
+  void RotateImage(const AnnotatedDatum& anno_datum,
+		   AnnotatedDatum* rotated_anno_datum);
+  
+  /**
    * @brief Applies the transformation defined in the data layer's
    * transform_param block to a vector of Mat.
    *
@@ -154,10 +177,18 @@ class DataTransformer {
    * @param transformed_blob
    *    This is destination blob. It can be part of top blob's data if
    *    set_cpu_data() is used. See image_data_layer.cpp for an example.
+   * @param preserve_pixel_vals
+   *    Use with dense label images to preserve the input pixel values
+   *    which would be labels (and thus cannot be interpolated or scaled).
+   * @param preserve_annotations
+   *    Use with bounding boxes annotations to avoid rotations for instance
+   *    (that are computed from within the annotated data layer instead)
    */
   void Transform(const cv::Mat& cv_img, Blob<Dtype>* transformed_blob,
-                 NormalizedBBox* crop_bbox, bool* do_mirror);
-  void Transform(const cv::Mat& cv_img, Blob<Dtype>* transformed_blob);
+                 NormalizedBBox* crop_bbox, bool* do_mirror,
+		 bool preserve_pixel_vals = false, bool preserve_annotations = false);
+  void Transform(const cv::Mat& cv_img, Blob<Dtype>* transformed_blob,
+		 bool preserve_pixel_vals = false, bool preserve_annotations = false);
 
   /**
    * @brief Crops img according to bbox.
@@ -215,7 +246,6 @@ class DataTransformer {
    * @param mat_vector
    *    A vector of Mat containing the data to be transformed.
    */
-#ifdef USE_OPENCV
   vector<int> InferBlobShape(const vector<cv::Mat> & mat_vector);
   /**
    * @brief Infers the shape of transformed_blob will have when
@@ -225,7 +255,6 @@ class DataTransformer {
    *    cv::Mat containing the data to be transformed.
    */
   vector<int> InferBlobShape(const cv::Mat& cv_img);
-#endif  // USE_OPENCV
 
  protected:
    /**
@@ -248,7 +277,9 @@ class DataTransformer {
    * transform_param block to the data and return transform information.
    */
   void Transform(const Datum& datum, Blob<Dtype>* transformed_blob,
-                 NormalizedBBox* crop_bbox, bool* do_mirror);
+                 NormalizedBBox* crop_bbox, bool* do_mirror,
+		 const bool preserve_pixel_vals = false,
+		 const bool preserve_annotations = false);
 
   // Tranformation parameters
   TransformationParameter param_;
@@ -265,3 +296,4 @@ class DataTransformer {
 }  // namespace caffe
 
 #endif  // CAFFE_DATA_TRANSFORMER_HPP_
+

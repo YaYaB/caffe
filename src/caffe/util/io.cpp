@@ -42,7 +42,11 @@ using google::protobuf::Message;
 
 bool ReadProtoFromTextFile(const char* filename, Message* proto) {
   int fd = open(filename, O_RDONLY);
-  CHECK_NE(fd, -1) << "File not found: " << filename;
+  if (fd == -1)
+    {
+      LOG(ERROR) << "File not found: " << filename;
+      CHECK_NE(fd, -1) << "File not found: " << filename;
+    }
   FileInputStream* input = new FileInputStream(fd);
   bool success = google::protobuf::TextFormat::Parse(input, proto);
   delete input;
@@ -79,9 +83,10 @@ void WriteProtoToBinaryFile(const Message& proto, const char* filename) {
 }
 
 #ifdef USE_OPENCV
-cv::Mat ReadImageToCVMat(const string& filename, const int height,
-    const int width, const int min_dim, const int max_dim,
-    const bool is_color) {
+cv::Mat ReadImageToCVMat(const string& filename,
+			 const int height, const int width, const int min_dim, const int max_dim,
+			 const bool is_color,
+			 const bool nearest_neighbour_interp) {
   cv::Mat cv_img;
   int cv_read_flag = (is_color ? CV_LOAD_IMAGE_COLOR :
     CV_LOAD_IMAGE_GRAYSCALE);
@@ -111,6 +116,10 @@ cv::Mat ReadImageToCVMat(const string& filename, const int height,
     }
   } else if (height > 0 && width > 0) {
     cv::resize(cv_img_origin, cv_img, cv::Size(width, height));
+    int cv_interp_flag = nearest_neighbour_interp ? CV_INTER_NN :
+                                                    CV_INTER_LINEAR;
+    cv::resize(cv_img_origin, cv_img, cv::Size(width, height), 0, 0,
+        cv_interp_flag);
   } else {
     cv_img = cv_img_origin;
   }
@@ -123,13 +132,14 @@ cv::Mat ReadImageToCVMat(const string& filename, const int height,
 }
 
 cv::Mat ReadImageToCVMat(const string& filename,
-    const int height, const int width, const bool is_color) {
-  return ReadImageToCVMat(filename, height, width, 0, 0, is_color);
+			 const int height, const int width, const bool is_color, 
+			 const bool nearest_neighbour_interp) {
+  return ReadImageToCVMat(filename, height, width, 0, 0, is_color, nearest_neighbour_interp);
 }
 
 cv::Mat ReadImageToCVMat(const string& filename,
     const int height, const int width) {
-  return ReadImageToCVMat(filename, height, width, true);
+  return ReadImageToCVMat(filename, height, width, true, false);
 }
 
 cv::Mat ReadImageToCVMat(const string& filename,
@@ -157,9 +167,10 @@ static bool matchExt(const std::string & fn,
 
 bool ReadImageToDatum(const string& filename, const int label,
     const int height, const int width, const int min_dim, const int max_dim,
-    const bool is_color, const std::string & encoding, Datum* datum) {
+		      const bool is_color, const bool nearest_neighbour_interp,
+		      const std::string & encoding, Datum* datum) {
   cv::Mat cv_img = ReadImageToCVMat(filename, height, width, min_dim, max_dim,
-                                    is_color);
+                                    is_color, nearest_neighbour_interp);
   if (cv_img.data) {
     if (encoding.size()) {
       if ( (cv_img.channels() == 3) == is_color && !height && !width &&
@@ -222,12 +233,14 @@ bool ReadRichImageToAnnotatedDatum(const string& filename,
         return ReadTxtToAnnotatedDatum(labelfile, ori_height, ori_width,
                                        anno_datum);
       } else {
-        LOG(FATAL) << "Unknown label file type.";
+        LOG(ERROR) << "Unknown label file type.";
+	LOG(FATAL) << "fatal error";
         return false;
       }
       break;
     default:
-      LOG(FATAL) << "Unknown annotation type.";
+      LOG(ERROR) << "Unknown annotation type.";
+      LOG(FATAL) << "fatal error";
       return false;
   }
 }
@@ -289,7 +302,8 @@ bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
         if (v2.first == "name") {
           string name = pt2.data();
           if (name_to_label.find(name) == name_to_label.end()) {
-            LOG(FATAL) << "Unknown name: " << name;
+            LOG(ERROR) << "Unknown name: " << name;
+	    LOG(FATAL) << "fatal error";
           }
           int label = name_to_label.find(name)->second;
           bool found_group = false;
@@ -390,7 +404,8 @@ bool ReadJSONToAnnotatedDatum(const string& labelfile, const int img_height,
     // Get category_id.
     string name = object.get<string>("category_id");
     if (name_to_label.find(name) == name_to_label.end()) {
-      LOG(FATAL) << "Unknown name: " << name;
+      LOG(ERROR) << "Unknown name: " << name;
+      LOG(FATAL) << "fatal error";
     }
     int label = name_to_label.find(name)->second;
     bool found_group = false;
@@ -579,7 +594,8 @@ bool ReadLabelFileToLabelMap(const string& filename, bool include_background,
         map_item->set_display_name(fields[2]);
         break;
       default:
-        LOG(FATAL) << "The number of fields should be [1, 3].";
+        LOG(ERROR) << "The number of fields should be [1, 3].";
+	LOG(FATAL) << "fatal error";
         break;
     }
   }
@@ -596,7 +612,8 @@ bool MapNameToLabel(const LabelMap& map, const bool strict_check,
     const int label = map.item(i).label();
     if (strict_check) {
       if (!name_to_label->insert(std::make_pair(name, label)).second) {
-        LOG(FATAL) << "There are many duplicates of name: " << name;
+        LOG(ERROR) << "There are many duplicates of name: " << name;
+	LOG(FATAL) << "fatal error";
         return false;
       }
     } else {
@@ -616,7 +633,8 @@ bool MapLabelToName(const LabelMap& map, const bool strict_check,
     const int label = map.item(i).label();
     if (strict_check) {
       if (!label_to_name->insert(std::make_pair(label, name)).second) {
-        LOG(FATAL) << "There are many duplicates of label: " << label;
+        LOG(ERROR) << "There are many duplicates of label: " << label;
+	LOG(FATAL) << "fatal error";
         return false;
       }
     } else {
@@ -637,7 +655,8 @@ bool MapLabelToDisplayName(const LabelMap& map, const bool strict_check,
     if (strict_check) {
       if (!label_to_display_name->insert(
               std::make_pair(label, display_name)).second) {
-        LOG(FATAL) << "There are many duplicates of label: " << label;
+        LOG(ERROR) << "There are many duplicates of label: " << label;
+	LOG(FATAL) << "fatal error";
         return false;
       }
     } else {

@@ -92,6 +92,9 @@ bool ProjectBBox(const NormalizedBBox& src_bbox, const NormalizedBBox& bbox,
 void ExtrapolateBBox(const ResizeParameter& param, const int height,
     const int width, const NormalizedBBox& crop_bbox, NormalizedBBox* bbox);
 
+// Rotate bbox by a 90, 180 or 270 deg angle.
+void RotateBBox(const int rangle, const NormalizedBBox& bbox, NormalizedBBox* rbbox);
+  
 // Compute the jaccard (intersection over union IoU) overlap between two bboxes.
 float JaccardOverlap(const NormalizedBBox& bbox1, const NormalizedBBox& bbox2,
                      const bool normalized = true);
@@ -417,6 +420,11 @@ void ApplyNMSFast(const vector<NormalizedBBox>& bboxes,
       const float nms_threshold, const float eta, const int top_k,
       vector<int>* indices);
 
+void ApplySoftNMSFast(const vector<NormalizedBBox>& bboxes,
+      const vector<float>& scores, const float score_threshold,
+      const float nms_threshold, const float eta, const float theta,
+      const int top_k, vector<int>* indices);
+  
 // Do non maximum suppression based on raw bboxes and scores data.
 // Inspired by Piotr Dollar's NMS implementation in EdgeBox.
 // https://goo.gl/jV3JYS
@@ -432,6 +440,11 @@ template <typename Dtype>
 void ApplyNMSFast(const Dtype* bboxes, const Dtype* scores, const int num,
       const float score_threshold, const float nms_threshold,
       const float eta, const int top_k, vector<int>* indices);
+
+template <typename Dtype>
+void ApplySoftNMSFast(const Dtype* bboxes, const Dtype* scores, const int num,
+      const float score_threshold, const float nms_threshold,
+		      const float eta, const float theta, const int top_k, vector<int>* indices);
 
 // Compute cumsum of a set of pairs.
 void CumSum(const vector<pair<float, int> >& pairs, vector<int>* cumsum);
